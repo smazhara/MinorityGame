@@ -41,31 +41,31 @@ contract MinorityGame {
     function commit(string salt, bytes32 hash) public onlyCommit payable {
         require(!empty(salt) && hash > 0 && msg.value == bid);
 
-        Commitment memory commitment = commitments[msg.sender];
-
-        if (newCommitment(commitment)) {
+        if (! hasCommitment()) {
             commitmentCount++;
         }
 
         commitments[msg.sender] = Commitment(salt, hash, '');
     }
 
+    mapping (address => uint) pendingWithdrawals;
+
+    function withdraw() public onlyCommit onlyExistingCommitment {
+        pendingWithdrawals[msg.sender] += bid;
+        delete commitments[msg.sender];
+        msg.sender.transfer(bid);
+    }
+
     // marked as 'view' to silence compiler warnings, but it's not 'view'
     // it can change commitment.choice
-    function reveal(string choice) public onlyReveal {
+    function reveal(string choice) public onlyReveal onlyExistingCommitment {
         require(equal(choice, "red") || equal(choice, "blue"));
 
         Commitment memory commitment = commitments[msg.sender];
 
-        require(existingCommitment(commitment));
-
         require(keccak256(commitment.salt, choice) == commitment.hash);
 
         commitments[msg.sender].choice = choice;
-    }
-
-    function keccak(string salt, string choice) public pure returns (bytes32) {
-        return keccak256(salt, choice);
     }
 
     function setState(GameState newState) public onlyOwner {
@@ -90,9 +90,13 @@ contract MinorityGame {
         return empty(commitment.salt);
     }
 
-    function existingCommitment(Commitment commitment)
-        private pure returns (bool)
+    modifier onlyExistingCommitment()
     {
-        return ! newCommitment(commitment);
+        require(hasCommitment());
+        _;
+    }
+
+    function hasCommitment() private view returns (bool) {
+        return !empty(commitments[msg.sender].salt);
     }
 }

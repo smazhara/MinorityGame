@@ -183,5 +183,29 @@ contract('MinorityGame', async accounts => {
         assert(false, 'Failed')
       })
     })
+
+    context('when in tally state', async () => {
+      beforeEach(async () => {
+        contract = await MinorityGame.deployed()
+        contract.setState(tally, { from: owner })
+      })
+
+      it('fails', async () => {
+        try {
+          await contract.commit(
+            alice.salt,
+            alice.hash,
+            { from: alice.account, value: validBid }
+          )
+        } catch (error) {
+          assert.equal(error, revertError)
+          const aliceChoice = (await contract.commitments(alice.account))[2]
+          assert.equal(aliceChoice, '')
+          return
+        }
+
+        assert(false, 'Failed')
+      })
+    })
   })
 })
