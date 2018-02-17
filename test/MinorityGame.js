@@ -1,29 +1,31 @@
 const MinorityGame = artifacts.require('./MinorityGame.sol');
 
 contract('MinorityGame', async accounts => {
+  let contract
+
   const owner = accounts[0]
 
-  const [red, blue] = [1, 2]
+  let salt = 'salt'
 
   const alice = {
     account: accounts[0],
-    salt: 'c9188b4',
-    hash: web3.sha3(`c9188b4${red}`),
-    choice: red
+    salt: 'salt',
+    hash: web3.sha3('saltred'),
+    choice: 'red'
   }
 
   const bob = {
     account: accounts[1],
-    salt: '2d989bb',
-    hash: web3.sha3(`2d989bb${red}`),
-    choice: red
+    salt: 'salt',
+    hash: web3.sha3('saltred'),
+    choice: 'red'
   }
 
   const carol = {
     account: accounts[2],
     salt: 'b25c13b',
-    hash: web3.sha3(`b25c13b${blue}`),
-    choice: blue
+    hash: web3.sha3('saltred'),
+    choice: 'blue'
   }
 
   const validBid = 100;
@@ -41,7 +43,7 @@ contract('MinorityGame', async accounts => {
   describe('constructor', async () => {
     contract = await MinorityGame.deployed()
 
-    xit('initializes', async () => {
+    it('initializes', async () => {
       assert.equal(await contract.state(), commit)
 
       assert.equal(await contract.commitmentCount(), 0)
@@ -50,7 +52,7 @@ contract('MinorityGame', async accounts => {
 
   describe('commit', async () => {
     context('when in commit state', async () => {
-      xit('fails if invalid bid amount', async () => {
+      it('fails if invalid bid amount', async () => {
         const contract = await MinorityGame.deployed()
 
         try {
@@ -61,20 +63,21 @@ contract('MinorityGame', async accounts => {
           )
         } catch (error) {
           assert.equal(error, revertError)
+          assert.equal(await commitmentCount(), 0)
+          return
         }
 
-        assert.equal(await commitmentCount(), 0)
+        assert(false, 'Failed')
       })
 
-      it('fails if empty hash', async () => {
+      it('fails if empty hash @focus', async () => {
         const contract = await MinorityGame.deployed()
 
         try {
-          a = await contract.commit1(
-            0,
+          await contract.commit(
+            '',
             alice.salt
           )
-            console.log(`>>> ${a} <<<`)
         } catch (error) {
           assert.equal(error, revertError)
           assert.equal(await commitmentCount(), 0)
@@ -84,7 +87,7 @@ contract('MinorityGame', async accounts => {
         assert(false, 'Failed')
       })
 
-      xit('fails if empty salt', async () => {
+      it('fails if empty salt', async () => {
         const contract = await MinorityGame.deployed()
 
         try {
@@ -95,12 +98,14 @@ contract('MinorityGame', async accounts => {
           )
         } catch (error) {
           assert.equal(error, revertError)
+          assert.equal(await commitmentCount(), 0)
+          return
         }
 
-        assert.equal(await commitmentCount(), 0)
+        assert(false, 'Failed')
       })
 
-      xit('works if valid bid', async () => {
+      it('works if valid bid', async () => {
         const contract = await MinorityGame.deployed()
 
         await contract.commit(
@@ -112,39 +117,71 @@ contract('MinorityGame', async accounts => {
         assert.equal(await contract.commitmentCount(), 1)
       })
 
-      xit('fails to reveal bid in commit state', async () => {
+      it('fails to reveal bid in commit state', async () => {
         assert.equal(await contract.state(), commit)
 
         try {
-          await contract.reveal(blue, { from: alice.account })
+          await contract.reveal('blue', { from: alice.account })
         } catch (error) {
           assert.equal(error, revertError)
+          return
         }
+
+        assert(false, 'Failed')
       })
     })
 
-    xcontext('when in reveal state', async () => {
+    context('when in reveal state', async () => {
       beforeEach(async () => {
-        contract.setState(reveal, { from: owner })
+        contract = await MinorityGame.deployed()
+        contract.setState(commit, { from: owner })
       })
 
-      xit('reveals valid value', async () => {
-        assert.equal(alice.choice, red)
+      it('reveals valid value', async () => {
+        assert.equal(alice.choice, 'red')
+
+        await contract.commit(
+          alice.salt,
+          alice.hash,
+          { from: alice.account, value: validBid }
+        )
+
+        contract.setState(reveal, { from: owner })
 
         assert(
-          (await contract.reveal(red, { from: alice.account }))
+          (await contract.reveal('red', { from: alice.account }))
         )
+
+        const aliceChoice = (await contract.commitments(alice.account))[2]
+
+        assert.equal(aliceChoice, 'red')
       })
 
-      xit('fails to reveal invalid value', async () => {
-        assert.equal(alice.choice, red)
+      it('fails to reveal invalid value', async () => {
+        assert.equal(alice.choice, 'red')
 
-        let a = await contract.reveal(red, { from: alice.account })
+        await contract.commit(
+          alice.salt,
+          alice.hash,
+          { from: alice.account, value: validBid }
+        )
 
-        console.log(a.toNumber())
+        contract.setState(reveal, { from: owner })
 
+        try {
+          await contract.reveal('blue', { from: alice.account })
+        } catch (error) {
+          assert.equal(error, revertError)
+
+          // alice choice hasn't changed
+          const aliceChoice = (await contract.commitments(alice.account))[2]
+          assert.equal(aliceChoice, '')
+
+          return
+        }
+
+        assert(false, 'Failed')
       })
-
     })
   })
 })

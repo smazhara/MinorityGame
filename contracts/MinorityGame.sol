@@ -9,12 +9,10 @@ contract MinorityGame {
 
     GameState public state = GameState.Commit;
 
-    enum Choice { NA, Blue, Red }
-
     struct Commitment {
+        string salt;
         bytes32 hash;
-        bytes32 salt;
-        uint8 choice;
+        string choice;
     }
 
     mapping (address => Commitment) public commitments;
@@ -40,38 +38,61 @@ contract MinorityGame {
         owner = msg.sender;
     }
 
-    function commit1(bytes23 hash, bytes32 salt) public onlyCommit returns (bool) {
-        return true;
-//        require(hash.length > 0 && salt.length > 0 && msg.value == bid);
+    function commit(string salt, bytes32 hash) public onlyCommit payable {
+        require(!empty(salt) && hash > 0 && msg.value == bid);
 
-        //if (commitments[msg.sender].hash == 0x0) {
-            //commitmentCount++;
-        //}
+        Commitment memory commitment = commitments[msg.sender];
 
-        //commitments[msg.sender] = Commitment(hash, salt, 0);
+        if (newCommitment(commitment)) {
+            commitmentCount++;
+        }
+
+        commitments[msg.sender] = Commitment(salt, hash, '');
     }
 
     // marked as 'view' to silence compiler warnings, but it's not 'view'
     // it can change commitment.choice
-    function reveal(uint8 choice) public view onlyReveal returns (uint8) {
-        require(choice == 1 || choice == 2);
+    function reveal(string choice) public onlyReveal {
+        require(equal(choice, "red") || equal(choice, "blue"));
 
         Commitment memory commitment = commitments[msg.sender];
 
-        require(commitment.hash != 0x0 && commitment.salt != 0x0);
+        require(existingCommitment(commitment));
 
-        if (keccak256(choice, commitment.salt) == commitment.hash) {
-            commitment.choice = choice;
-        }
+        require(keccak256(commitment.salt, choice) == commitment.hash);
 
-        return commitment.choice;// > 0;
+        commitments[msg.sender].choice = choice;
     }
 
-    function keccak(string choice) public pure returns (bytes32) {
-        return keccak256(choice);
+    function keccak(string salt, string choice) public pure returns (bytes32) {
+        return keccak256(salt, choice);
     }
 
     function setState(GameState newState) public onlyOwner {
         state = newState;
+    }
+
+    function equalString(string a, string b) private pure returns (bool) {
+        return keccak256(a) == keccak256(b);
+    }
+
+    function equal(string a, string b) private pure returns (bool) {
+        return keccak256(a) != keccak256(b);
+    }
+
+    function empty(string a) private pure returns (bool) {
+        return equalString(a, "");
+    }
+
+    function newCommitment(Commitment commitment)
+        private pure returns (bool)
+    {
+        return empty(commitment.salt);
+    }
+
+    function existingCommitment(Commitment commitment)
+        private pure returns (bool)
+    {
+        return ! newCommitment(commitment);
     }
 }
