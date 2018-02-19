@@ -15,26 +15,83 @@ contract MinorityGame {
 
     uint public state = Commit;
 
-    struct Commitment {
+    struct Player {
         bytes32 hash;
         string choice;
+        bool cashed;
     }
 
-    mapping (address => Commitment) public commitments;
+    mapping (address => Player) public players;
 
-    uint8 public commitmentCount;
+    uint8 public playerCount;
 
     uint8 public blueCount;
 
     uint8 public redCount;
 
+    mapping (address => uint) pendingWithdrawals;
+
     function MinorityGame() public {
         owner = msg.sender;
     }
 
-    function sender() public view returns (address) {
-        return msg.sender;
+    function () external { revert(); }
+
+    // external
+
+    function commit(bytes32 hash)
+        external payable onlyState(Commit)
+    {
+        if (existingPlayer()) {
+            require(msg.value == 0);
+        } else {
+            require(msg.value == bid);
+        }
+
+        if (! existingPlayer()) {
+            playerCount++;
+        }
+
+        players[msg.sender] = Player(hash, '', false);
     }
+
+    function withdraw()
+        external onlyState(Commit) onlyExistingPlayer
+    {
+        pendingWithdrawals[msg.sender] += bid;
+        playerCount--;
+        delete players[msg.sender];
+        msg.sender.transfer(bid);
+    }
+
+    function player() public view returns (Player) {
+        return players[msg.sender];
+    }
+
+    // marked as 'view' to silence compiler warnings, but it's not 'view'
+    // it can change commitment.choice
+    function reveal(string choice, string nonce)
+        external onlyState(Reveal) onlyExistingPlayer
+    {
+        bool redChoice = equal(choice, "red");
+        bool blueChoice = equal(choice, "blue");
+        require(redChoice || blueChoice);
+
+        require(keccak256(choice, nonce) == player().hash);
+
+        players[msg.sender].choice = choice;
+
+        if (redChoice)
+            redCount++;
+
+        if (blueChoice)
+            blueCount++;
+    }
+
+    //function cashout()
+    //    external onlyState(Cashout) onlyWinner
+    //{
+    //}
 
     modifier onlyState(uint stateMask) {
         require(state & stateMask > 0);
@@ -44,7 +101,7 @@ contract MinorityGame {
     modifier onlyWinner {
         require(
             equal(winningChoice(), "draw") ||
-            equal(commitments[msg.sender].choice, winningChoice())
+            equal(player().choice, winningChoice())
         );
         _;
     }
@@ -58,68 +115,17 @@ contract MinorityGame {
         return this.balance;
     }
 
-    function commit(bytes32 hash)
-        public payable onlyState(Commit)
-    {
-        if (hasCommitment()) {
-            require(msg.value == 0);
-        } else {
-            require(msg.value == bid);
-        }
-
-        if (! hasCommitment()) {
-            commitmentCount++;
-        }
-
-        commitments[msg.sender] = Commitment(hash, '');
-    }
-
-    mapping (address => uint) pendingWithdrawals;
-
-    function withdraw()
-        public onlyState(Commit) onlyExistingCommitment
-    {
-        pendingWithdrawals[msg.sender] += bid;
-        commitmentCount--;
-        delete commitments[msg.sender];
-        msg.sender.transfer(bid);
-    }
-
-    // marked as 'view' to silence compiler warnings, but it's not 'view'
-    // it can change commitment.choice
-    function reveal(string choice, string nonce)
-        public onlyState(Reveal) onlyExistingCommitment
-    {
-        bool redChoice = equal(choice, "red");
-        bool blueChoice = equal(choice, "blue");
-        require(redChoice || blueChoice);
-
-        require(keccak256(choice, nonce) == commitments[msg.sender].hash);
-
-        commitments[msg.sender].choice = choice;
-
-        if (redChoice)
-            redCount++;
-
-        if (blueChoice)
-            blueCount++;
-    }
-
     function winningChoice()
         public view onlyState(Reveal | Cashout | Pause) returns (string)
     {
-        if (redCount < blueCount && redCount > 0)
+        if (redCount == 0 || blueCount == 0 || redCount == blueCount)
+            return "draw";
+
+        if (redCount < blueCount)
             return "red";
 
-        if (redCount > blueCount && blueCount > 0)
+        if (redCount > blueCount)
             return "blue";
-
-        return "draw";
-    }
-
-    function cashout()
-        public onlyState(Cashout) onlyWinner
-    {
     }
 
     // onlyOwner functions
@@ -137,14 +143,14 @@ contract MinorityGame {
         return equal(a, "");
     }
 
-    modifier onlyExistingCommitment()
+    modifier onlyExistingPlayer()
     {
-        require(hasCommitment());
+        require(existingPlayer());
         _;
     }
 
-    function hasCommitment() private view returns (bool) {
-        return commitments[msg.sender].hash > 0;
+    function existingPlayer() public view returns (bool) {
+        return player().hash > 0;
     }
 
     function validState(uint _state) private pure returns (bool) {

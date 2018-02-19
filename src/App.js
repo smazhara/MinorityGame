@@ -39,11 +39,22 @@ export default class App extends Component {
 
       await this.instantiateContract()
 
+      this.setState({
+        deployed: true
+      })
+
+      window.app = this // debug
+
       this.updateState()
+
       setInterval(this.updateState, 1000)
     })
     .catch((error) => {
-      console.log(`Error finding web3: ${error}`)
+      if (error.message.match(/^Contract has not been deployed/)) {
+        this.setState({ deployed: false })
+      } else {
+        console.log(`Error finding web3: ${error}`)
+      }
     })
   }
 
@@ -66,9 +77,20 @@ export default class App extends Component {
       redCount: await this.redCount(),
       blueCount: await this.blueCount(),
       isOwner: await this.isOwner(),
-      commitment: await this.contract.commitments(this.state.account),
+      player: await this.player(),
       balance: (await this.contract.getBalance()).toNumber()
     })
+
+  }
+
+  async player() {
+    const player = await this.contract.players(this.state.account)
+
+    return {
+      hash: player[0],
+      choice: player[1],
+      cachedOut: player[2]
+    }
   }
 
   async isOwner() {
@@ -77,7 +99,7 @@ export default class App extends Component {
   }
 
   async playerCount() {
-    return (await this.contract.commitmentCount()).toNumber()
+    return (await this.contract.playerCount()).toNumber()
   }
 
   async redCount() {
@@ -89,11 +111,16 @@ export default class App extends Component {
   }
 
   async isPlaying() {
-    return (await this.contract.commitments(this.state.account))[0] > 0
+    return !this.web3.toBigNumber((await this.player()).hash).isZero()
   }
 
   async gameState() {
-    const stateLabels = ['Commit', 'Reveal', 'Tally', 'Paused']
+    const stateLabels = {
+      1: 'Commit',
+      2: 'Reveal',
+      4: 'Tally',
+      8: 'Pause'
+    }
 
     const state = await this.contract.state()
 
@@ -167,43 +194,55 @@ export default class App extends Component {
   }
 
   PlayerControls = () => {
-    if (this.state.state === 'Commit') {
+    switch (this.state.state) {
+    case 'Commit':
+      return <this.CommitControls/>
+    case 'Reveal':
+      return <this.RevealControls/>
+    case 'Tally':
+      return <this.TallyControls/>
+    default:
+      console.log(`Unknown state ${this.state.state}`)
+      return <p>Unknown state ${this.state.state}</p>
+    }
+  }
+
+  WaitNextTurnError = () => {
+    return (
+      <p>wait next turn</p>
+    )
+  }
+
+  RevealControls = () => {
+    if (! this.state.playing)
+      return <this.WaitNextTurnError/>
+
+    let move = this.state.player.choice
+
+    if (move === '') {
+      return (
+        <p>
+          <button onClick={this.onReveal}>Reveal your hand</button>
+        </p>
+      )
+    } else {
+      return (
+        <p>
+          You bet on {move}.
+        </p>
+      )
+    }
+  }
+
+  CommitControls = () => {
+    if (this.state.playing) {
       return (
         <p>
           You are in
           <button onClick={this.onWithdraw}>Withdraw</button>
         </p>
       )
-    }
-
-    if (this.state.state === 'Reveal') {
-      let move = this.state.commitment[1]
-
-      if (move === '') {
-        return (
-          <p>
-            <button onClick={this.onReveal}>Reveal your hand</button>
-          </p>
-        )
-      } else {
-        return (
-          <p>
-            You bet on {move}.
-          </p>
-        )
-      }
-    }
-
-    return <b>nothing</b>
-  }
-
-  Controls = () => {
-    if (this.state.playing) {
-      return <this.PlayerControls/>
-    }
-
-
-    if (this.state.state === 'Commit') {
+    } else {
       return (
         <p>
           Make your move
@@ -212,13 +251,53 @@ export default class App extends Component {
           <button onClick={this.onRed}>Red</button>
         </p>
       )
-    } else {
-      return <p>Wait for the next turn</p>
     }
   }
 
+  TallyControls = () => {
+    return (
+      <p>tally</p>
+    )
+  }
+
+  GamePanel = () => {
+    const { PlayerControls } = this
+
+    return (
+      <div>
+        <h1>Good to Go!</h1>
+
+        <p>Game state <u>{this.state.state}</u></p>
+
+        <p>Account: <u>{this.state.accountName}</u></p>
+
+        <PlayerControls/>
+
+        <p>Players <u>{this.state.playerCount}</u></p>
+
+        <p>Reds <u>{this.state.redCount}</u></p>
+
+        <p>Blues <u>{this.state.blueCount}</u></p>
+
+        <p>{this.state.error}</p>
+
+        <AdminPanel
+          app={this}
+          contract={this.contract}
+          account={this.state.account}
+        />
+      </div>
+    )
+  }
+
+  NotDeployedError = () => {
+    return (
+      <p>Game is not deployed on this network</p>
+    )
+  }
+
   render() {
-    const { Controls } = this
+    const { GamePanel, NotDeployedError } = this
 
     return (
       <div className="App">
@@ -231,23 +310,7 @@ export default class App extends Component {
         <main className="container">
           <div className="pure-g">
             <div className="pure-u-1-1">
-              <h1>Good to Go!</h1>
-
-              <p>Game state <u>{this.state.state}</u></p>
-
-              <p>Account: <u>{this.state.accountName}</u></p>
-
-              <Controls/>
-
-              <p>Players <u>{this.state.playerCount}</u></p>
-
-              <p>Reds <u>{this.state.redCount}</u></p>
-
-              <p>Blues <u>{this.state.blueCount}</u></p>
-
-              <p>{this.state.error}</p>
-
-              <AdminPanel app={this} contract={this.contract} account={this.state.account}/>
+              {this.state.deployed ? <GamePanel/> : <NotDeployedError/>}
 
             </div>
           </div>

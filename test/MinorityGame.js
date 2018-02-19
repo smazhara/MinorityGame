@@ -51,7 +51,7 @@ contract('MinorityGame', async accounts => {
 
   async function assertCommitment(player) {
     const [ contractHash, contractChoice ] =
-      await contract.commitments(player.account)
+      await contract.players(player.account)
 
     assert.equal(contractHash, player.hash)
     assert.equal(contractChoice, '')
@@ -96,7 +96,7 @@ contract('MinorityGame', async accounts => {
     it('initializes', async () => {
       assert.equal(await contract.state(), commit)
 
-      assert.equal(await contract.commitmentCount(), 0)
+      assert.equal(await contract.playerCount(), 0)
     })
   })
 
@@ -225,7 +225,7 @@ contract('MinorityGame', async accounts => {
             await subject()
 
             assert.equal(
-              (await contract.commitments(alice.account))[1], alice.choice
+              (await contract.players(alice.account))[1], alice.choice
             )
           })
         })

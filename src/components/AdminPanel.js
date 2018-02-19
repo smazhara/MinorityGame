@@ -7,7 +7,12 @@ export default class extends React.Component {
   }
 
   get states() {
-    return ['Commit', 'Reveal', 'Tally', 'Paused']
+    return {
+      1: 'Commit',
+      2: 'Reveal',
+      4: 'Tally',
+      8: 'Pause'
+    }
   }
 
   render() {
@@ -17,10 +22,10 @@ export default class extends React.Component {
     return (
       <fieldset>
         <legend>Admin Panel</legend>
-        {this.states.map((name, state) => {
+        {Object.keys(this.states).map((state) => {
           return (
             <button onClick={() => this.onSetState(state)} key={state}>
-              {name}
+              {this.states[state]}
             </button>
           )
         })}
