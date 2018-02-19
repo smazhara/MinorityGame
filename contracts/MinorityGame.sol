@@ -1,16 +1,15 @@
 pragma solidity ^0.4.19;
 
 contract MinorityGame {
-    address owner;
+    address public owner;
 
-    enum GameState { Commit, Reveal, Tally }
+    enum GameState { Commit, Reveal, Tally, Pause }
 
-    uint256 constant bid = 100;
+    uint256 constant bid = 1000000000000000;
 
     GameState public state = GameState.Commit;
 
     struct Commitment {
-        string salt;
         bytes32 hash;
         string choice;
     }
@@ -18,6 +17,18 @@ contract MinorityGame {
     mapping (address => Commitment) public commitments;
 
     uint8 public commitmentCount;
+
+    uint8 public blueCount;
+
+    uint8 public redCount;
+
+    function MinorityGame() public {
+        owner = msg.sender;
+    }
+
+    function sender() public view returns (address) {
+        return msg.sender;
+    }
 
     modifier onlyCommit {
         require(state == GameState.Commit);
@@ -34,60 +45,75 @@ contract MinorityGame {
         _;
     }
 
-    function MinorityGame() public {
-        owner = msg.sender;
+    modifier onlyRunning {
+        require(state != GameState.Pause);
+        _;
     }
 
-    function commit(string salt, bytes32 hash) public onlyCommit payable {
-        require(!empty(salt) && hash > 0 && msg.value == bid);
+    function getBalance() public view returns (uint256) {
+        return this.balance;
+    }
+
+    function commit(bytes32 hash)
+        public onlyCommit payable onlyRunning
+    {
+        require(msg.value == bid);
 
         if (! hasCommitment()) {
             commitmentCount++;
         }
 
-        commitments[msg.sender] = Commitment(salt, hash, '');
+        commitments[msg.sender] = Commitment(hash, '');
     }
 
     mapping (address => uint) pendingWithdrawals;
 
-    function withdraw() public onlyCommit onlyExistingCommitment {
+    function withdraw()
+        public onlyCommit onlyRunning onlyExistingCommitment
+    {
         pendingWithdrawals[msg.sender] += bid;
+        commitmentCount--;
         delete commitments[msg.sender];
         msg.sender.transfer(bid);
     }
 
     // marked as 'view' to silence compiler warnings, but it's not 'view'
     // it can change commitment.choice
-    function reveal(string choice) public onlyReveal onlyExistingCommitment {
-        require(equal(choice, "red") || equal(choice, "blue"));
+    function reveal(string choice, string nonce)
+        public onlyReveal onlyExistingCommitment onlyRunning
+    {
+        bool redChoice = equal(choice, "red");
+        bool blueChoice = equal(choice, "blue");
+        require(redChoice || blueChoice);
 
-        Commitment memory commitment = commitments[msg.sender];
-
-        require(keccak256(commitment.salt, choice) == commitment.hash);
+        require(keccak256(choice, nonce) == commitments[msg.sender].hash);
 
         commitments[msg.sender].choice = choice;
+
+        if (redChoice)
+            redCount++;
+
+        if (blueChoice)
+            blueCount++;
     }
 
+    // onlyOwner functions
     function setState(GameState newState) public onlyOwner {
         state = newState;
     }
 
-    function equalString(string a, string b) private pure returns (bool) {
+    function equal(string a, string b) private pure returns (bool) {
         return keccak256(a) == keccak256(b);
     }
 
-    function equal(string a, string b) private pure returns (bool) {
-        return keccak256(a) != keccak256(b);
-    }
-
     function empty(string a) private pure returns (bool) {
-        return equalString(a, "");
+        return equal(a, "");
     }
 
     function newCommitment(Commitment commitment)
         private pure returns (bool)
     {
-        return empty(commitment.salt);
+        return commitment.hash == 0;
     }
 
     modifier onlyExistingCommitment()
@@ -97,6 +123,6 @@ contract MinorityGame {
     }
 
     function hasCommitment() private view returns (bool) {
-        return !empty(commitments[msg.sender].salt);
+        return commitments[msg.sender].hash > 0;
     }
 }
