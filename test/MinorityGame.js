@@ -8,30 +8,36 @@ contract('MinorityGame', async accounts => {
   const alice = {
     account: accounts[0],
     nonce: 'nonce',
-    choice: 'red'
+    choice: 'blue'
   }
-
   alice.hash = web3.sha3(alice.choice + alice.nonce)
 
   const bob = {
     account: accounts[1],
     nonce: 'nonce',
-    hash: web3.sha3('noncered'),
     choice: 'red'
   }
+  bob.hash = web3.sha3(bob.choice + bob.nonce)
 
   const carol = {
     account: accounts[2],
     nonce: 'b25c13b',
-    hash: web3.sha3('noncered'),
-    choice: 'blue'
+    choice: 'red'
   }
+  carol.hash = web3.sha3(carol.choice + carol.nonce)
 
   const validBid = 1000000000000000;
 
   const invalidBid = 1;
 
-  const [commit, reveal, tally, pause] = [0, 1, 2, 3]
+  const [commit, reveal, cashout, pause] = [1, 2, 4, 8]
+
+  const labels = {
+    1: 'commit',
+    2: 'reveal',
+    4: 'cashout',
+    8: 'pause'
+  }
 
   const revertError = 'Error: VM Exception while processing transaction: revert'
 
@@ -59,12 +65,16 @@ contract('MinorityGame', async accounts => {
     assert.equal(contractChoice, player.choice)
   }
 
-  async function sendCommit(player) {
-    await contract.commit(
-      player.hash,
-      { from: player.account, value: validBid }
-    )
-  }
+    async function makeCommit(player) {
+      await contract.commit(
+        player.hash,
+        { from: player.account, value: validBid }
+      )
+    }
+
+    async function makeReveal(player) {
+      await contract.reveal(player.choice, player.nonce, { from: player.account })
+    }
 
   async function assertNoCommitment(player) {
     const [ contractHash, contractChoice ] =
@@ -72,6 +82,10 @@ contract('MinorityGame', async accounts => {
 
     assert.equal(contractHash, 0)
     assert.equal(contractChoice, '')
+  }
+
+  async function contractBalance() {
+    return (await contract.getBalance()).toNumber()
   }
 
   beforeEach(async () => {
@@ -87,7 +101,7 @@ contract('MinorityGame', async accounts => {
   })
 
   describe('commit', async () => {
-    async function subject() {
+    async function subject(bid) {
       await contract.commit(
         alice.hash,
         { from: alice.account, value: bid }
@@ -97,31 +111,53 @@ contract('MinorityGame', async accounts => {
     context('when in commit state', () => {
       beforeEach(() => setState(commit))
 
-      it('fails if invalid bid amount', async () => {
-        bid = invalidBid
+      context('when invalid bid amount', async () => {
+        it('fails', async () => {
+          try {
+            await subject(invalidBid)
+          } catch (error) {
+            assert.equal(error, revertError)
+            assertNoCommitment(alice)
+            return
+          }
 
-        try {
-          await subject()
-        } catch (error) {
-          assert.equal(error, revertError)
-          assertNoCommitment(alice)
-          return
-        }
-
-        assert(false, 'Failed')
+          assert(false, 'Failed')
+        })
       })
 
-      it('works if valid bid amount', async () => {
-        bid = validBid
+      context('when valid bid amount', () => {
+        beforeEach(async () => await subject(validBid))
 
-        await subject()
+        it('works', async () => {
+          assertCommitment(alice)
+          assert.equal(await contractBalance(), validBid)
+        })
+      })
 
-        assertCommitment(alice)
+      context('when duplicate commit', () => {
+        beforeEach(async () => await subject(validBid))
+
+        it('fails when payment sent', async () => {
+          try {
+            await subject(validBid)
+          } catch (error) {
+            assert.equal(error, revertError)
+            assert.equal(await contractBalance(), validBid)
+            return
+          }
+
+          assert(false, 'Failed')
+        })
+
+        it('works when payment not sent', async () => {
+          await subject(0)
+          assert.equal(await contractBalance(), validBid)
+        })
       })
     })
 
-    Array.of(reveal, tally, pause).map(state => {
-      context(`when in ${state} state`, () => {
+    Array.of(reveal, cashout, pause).map(state => {
+      context(`when in ${labels[state]} state`, () => {
         beforeEach(() => setState(state))
 
         it('just fails', async () => {
@@ -196,8 +232,8 @@ contract('MinorityGame', async accounts => {
       })
     })
 
-    Array.of(commit, tally, pause).map(state => {
-      context(`when in ${state} state`, () => {
+    Array.of(commit, cashout, pause).map(state => {
+      context(`when in ${labels[state]} state`, () => {
         beforeEach(() => setState(state))
 
         it('fails', fails)
@@ -218,8 +254,8 @@ contract('MinorityGame', async accounts => {
       }
     }
 
-    Array.of(reveal, tally, pause).map(state => {
-      context(`when in ${state} state`, () => {
+    Array.of(reveal, cashout, pause).map(state => {
+      context(`when in ${labels[state]} state`, () => {
         beforeEach(() => setState(state))
 
         it('fails', fails)
@@ -227,15 +263,110 @@ contract('MinorityGame', async accounts => {
     })
 
     context('when in commit state', () => {
-      beforeEach(() => {
-        setState(commit)
-        sendCommit(alice)
+      beforeEach(() => setState(commit))
+
+      context('when commitment', () => {
+        beforeEach(() => makeCommit(alice))
+
+        it('works', async () => {
+          await subject()
+
+          assertNoCommitment(alice)
+        })
       })
 
-      it('works', async () => {
-        await subject()
+      context('when no commitment', () => {
+        it('fails', async () => {
+          try {
+            await subject()
+          } catch (error) {
+            assert.equal(error, revertError)
+          }
+        })
+      })
+    })
+  })
 
-        assertNoCommitment(alice)
+  describe('winningChoice', () => {
+    async function subject() {
+      return await contract.winningChoice()
+    }
+
+    context('when commit', () => {
+      beforeEach(() => setState(commit))
+
+      it('fails', async () => {
+        try {
+          await subject()
+        } catch (error) {
+          assert.equal(error, revertError)
+          return
+        }
+
+        assert(false, 'Failed')
+      })
+    })
+
+    Array.of(reveal, cashout, pause).map(state => {
+      context(`when ${labels[state]}`, () => {
+        beforeEach(() => setState(state))
+
+        context('when nothing revealed yet', () => {
+          it('returns draw', async () => {
+            assert.equal(await subject(), 'draw')
+          })
+        })
+
+        context('when 1 color only revealed', () => {
+          beforeEach(async () => {
+            await setState(commit)
+            await makeCommit(alice)
+
+            await setState(reveal)
+            await makeReveal(alice)
+          })
+
+          it('returns draw - \
+            because there nobody to collect a prize', async () =>
+          {
+            assert.equal(await subject(), 'draw')
+          })
+
+        })
+
+        context('when 1 red and 1 blue revealed', () => {
+          beforeEach(async () => {
+            await setState(commit)
+            await makeCommit(alice)
+            await makeCommit(bob)
+
+            await setState(reveal)
+            await makeReveal(alice)
+            await makeReveal(bob)
+          })
+
+          it('returns draw', async () => {
+            assert.equal(await subject(), 'draw')
+          })
+        })
+
+        context('when 2 red and 1 blue revealed', () => {
+          beforeEach(async () => {
+            await setState(commit)
+            await makeCommit(alice)
+            await makeCommit(bob)
+            await makeCommit(carol)
+
+            await setState(reveal)
+            await makeReveal(alice)
+            await makeReveal(bob)
+            await makeReveal(carol)
+          })
+
+          it('returns blue', async () => {
+            assert.equal(await subject(), 'blue')
+          })
+        })
       })
     })
   })

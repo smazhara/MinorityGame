@@ -3,11 +3,17 @@ pragma solidity ^0.4.19;
 contract MinorityGame {
     address public owner;
 
-    enum GameState { Commit, Reveal, Tally, Pause }
+    uint constant Commit = 1 << 0;
+
+    uint constant Reveal = 1 << 1;
+
+    uint constant Cashout = 1 << 2;
+
+    uint constant Pause = 1 << 3;
 
     uint256 constant bid = 1000000000000000;
 
-    GameState public state = GameState.Commit;
+    uint public state = Commit;
 
     struct Commitment {
         bytes32 hash;
@@ -30,13 +36,16 @@ contract MinorityGame {
         return msg.sender;
     }
 
-    modifier onlyCommit {
-        require(state == GameState.Commit);
+    modifier onlyState(uint stateMask) {
+        require(state & stateMask > 0);
         _;
     }
 
-    modifier onlyReveal {
-        require(state == GameState.Reveal);
+    modifier onlyWinner {
+        require(
+            equal(winningChoice(), "draw") ||
+            equal(commitments[msg.sender].choice, winningChoice())
+        );
         _;
     }
 
@@ -45,19 +54,18 @@ contract MinorityGame {
         _;
     }
 
-    modifier onlyRunning {
-        require(state != GameState.Pause);
-        _;
-    }
-
     function getBalance() public view returns (uint256) {
         return this.balance;
     }
 
     function commit(bytes32 hash)
-        public onlyCommit payable onlyRunning
+        public payable onlyState(Commit)
     {
-        require(msg.value == bid);
+        if (hasCommitment()) {
+            require(msg.value == 0);
+        } else {
+            require(msg.value == bid);
+        }
 
         if (! hasCommitment()) {
             commitmentCount++;
@@ -69,7 +77,7 @@ contract MinorityGame {
     mapping (address => uint) pendingWithdrawals;
 
     function withdraw()
-        public onlyCommit onlyRunning onlyExistingCommitment
+        public onlyState(Commit) onlyExistingCommitment
     {
         pendingWithdrawals[msg.sender] += bid;
         commitmentCount--;
@@ -80,7 +88,7 @@ contract MinorityGame {
     // marked as 'view' to silence compiler warnings, but it's not 'view'
     // it can change commitment.choice
     function reveal(string choice, string nonce)
-        public onlyReveal onlyExistingCommitment onlyRunning
+        public onlyState(Reveal) onlyExistingCommitment
     {
         bool redChoice = equal(choice, "red");
         bool blueChoice = equal(choice, "blue");
@@ -97,8 +105,27 @@ contract MinorityGame {
             blueCount++;
     }
 
+    function winningChoice()
+        public view onlyState(Reveal | Cashout | Pause) returns (string)
+    {
+        if (redCount < blueCount && redCount > 0)
+            return "red";
+
+        if (redCount > blueCount && blueCount > 0)
+            return "blue";
+
+        return "draw";
+    }
+
+    function cashout()
+        public onlyState(Cashout) onlyWinner
+    {
+    }
+
     // onlyOwner functions
-    function setState(GameState newState) public onlyOwner {
+    function setState(uint newState) public onlyOwner {
+        require(validState(newState));
+
         state = newState;
     }
 
@@ -110,12 +137,6 @@ contract MinorityGame {
         return equal(a, "");
     }
 
-    function newCommitment(Commitment commitment)
-        private pure returns (bool)
-    {
-        return commitment.hash == 0;
-    }
-
     modifier onlyExistingCommitment()
     {
         require(hasCommitment());
@@ -124,5 +145,12 @@ contract MinorityGame {
 
     function hasCommitment() private view returns (bool) {
         return commitments[msg.sender].hash > 0;
+    }
+
+    function validState(uint _state) private pure returns (bool) {
+        return _state == Commit ||
+            _state == Reveal ||
+            _state == Cashout ||
+            _state == Pause;
     }
 }
